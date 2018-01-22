@@ -14,6 +14,31 @@ Explanation
 
 ---
 
+## 本目录
+
+- [tcprelay-使用](#tcprelay-使用)
+
+- [tcprelay-require-导入](#tcprelay-require)
+
+- [tcprelay-tcprelay-实例](#tcprelay-tcprelay)
+
+- [tcprelay-生命周期-bootstrap](#tcprelay-生命周期-bootstrap)
+
+- [initserver-local - 本地的初始化](#initserver-local)
+
+- [handleconnectionbylocal - 本地连接成功触发事件](#handleconnectionbylocal)
+
+- [initserver-server - 服务器端初始化](#initserver-server)
+
+- [handleConnectionByServer - 连接成功触发事件](#handleconnectionbyserver)
+
+- [tcprelay-生命周期-stop](#tcprelay-生命周期-stop)
+
+- [tcprelay-其他-prototype](#tcprelay-其他-prototype)
+
+- [其他](#其他)
+
+---
 ## TCPRelay-使用
 
 [server.js](./shadowsocks-over-websocket/server.js#L28)
@@ -474,11 +499,203 @@ TCPRelay.prototype.initServer = function() {
 
 > 服务器-connection-建立-触发事件
 
-- self.handleConnectionByServer(connection)
+- [`self.handleConnectionByServer(connection)`](#handleconnectionbyserver)
 
-> connection-触发事件
+> 服务器-connection-触发事件
+
 ---
 
+## handleConnectionByServer
+
+代码 205-313
+
+``` js
+//server
+TCPRelay.prototype.handleConnectionByServer = function(connection) {
+	var self = this;
+	var config = self.config;
+	var method = config.method;
+	var password = config.password;
+	var serverAddress = config.serverAddress;
+	var serverPort = config.serverPort;
+
+	var logger = self.logger;
+	var encryptor = new Encryptor(password, method);
+
+	var stage = STAGE_INIT;
+	var connectionId = (globalConnectionId++) % MAX_CONNECTIONS;
+	var targetConnection, addressHeader;
+
+	var dataCache = [];
+
+	logger.info(`[${connectionId}]: accept connection from local`);
+	connections[connectionId] = connection;
+	connection.on('message', function(data) {
+		data = encryptor.decrypt(data);
+		logger.debug(`[${connectionId}]: read data[length = ${data.length}] from local connection at stage[${STAGE[stage]}]`);
+
+		switch (stage) {
+
+			case STAGE_INIT:
+				if (data.length < 7) {
+					stage = STAGE_DESTROYED;
+					return connection.close();
+				}
+				addressHeader = parseAddressHeader(data, 0);
+				if (!addressHeader) {
+					stage = STAGE_DESTROYED;
+					return connection.close();
+				}
+
+				logger.info(`[${connectionId}]: connecting to ${addressHeader.dstAddr}:${addressHeader.dstPort}`);
+				stage = STAGE_CONNECTING;
+
+				targetConnection = net.createConnection({
+					port: addressHeader.dstPort,
+					host: addressHeader.dstAddr,
+					allowHalfOpen: true
+				}, function() {
+					logger.info(`[${connectionId}]: connecting to target`);
+
+					dataCache = Buffer.concat(dataCache);
+					targetConnection.write(dataCache, function() {
+						logger.debug(`[${connectionId}]: write data[length = ${dataCache.length}] to target connection`);
+						dataCache = null;
+					});
+					stage = STAGE_STREAM;
+				});
+
+				targetConnection.on('data', function(data) {
+					logger.debug(`[${connectionId}]: read data[length = ${data.length}] from target connection`);
+					if (connection.readyState == WebSocket.OPEN) {
+						connection.send(encryptor.encrypt(data), {
+							binary: true
+						}, function() {
+							logger.debug(`[${connectionId}]: write data[length = ${data.length}] to local connection`);
+						});
+					}
+				});
+				targetConnection.on('end', function() {
+					logger.info(`[${connectionId}]: end event of target connection has been triggered`);
+					stage = STAGE_DESTROYED;
+					connection.close();
+				});
+				targetConnection.on('close', function(hadError) {
+					logger.info(`[${connectionId}]: close event[had error = ${hadError}] of target connection has been triggered`);
+					stage = STAGE_DESTROYED;
+					connection.close();
+				});
+				targetConnection.on('error', function(error) {
+					logger.error(`[${connectionId}]: an error of target connection occured`, error);
+					stage = STAGE_DESTROYED;
+					targetConnection.destroy();
+					connection.close();
+				});
+
+				if (data.length > addressHeader.headerLen) {
+					dataCache.push(data.slice(addressHeader.headerLen));
+				}
+				break;
+
+			case STAGE_CONNECTING:
+				dataCache.push(data);
+				break;
+
+			case STAGE_STREAM:
+				targetConnection.write(data, function() {
+					logger.debug(`[${connectionId}]: write data[length = ${data.length}] to target connection`);
+				});
+				break;
+		}
+	});
+	connection.on('close', function(code, reason) {
+		logger.info(`[${connectionId}]: close event[code = '${WSErrorCode[code]}'] of local connection has been triggered`);
+		connections[connectionId] = null;
+		targetConnection && targetConnection.destroy();
+	});
+	connection.on('error', function(error) {
+		logger.error(`[${connectionId}]: an error of connection local occured`, error);
+		connection.terminate();
+		connections[connectionId] = null;
+		targetConnection && targetConnection.end();
+	});
+};
+```
+---
+
+## tcprelay-生命周期-stop
+
+代码 452-471
+
+``` js
+TCPRelay.prototype.stop = function() {
+	var self = this;
+	var connId = null;
+	return new Promise(function(resolve, reject) {
+		if (self.server) {
+			self.server.close(function() {
+				resolve();
+			});
+
+			for (connId in connections) {
+				if (connections[connId]) {
+					self.isLocal ? connections[connId].destroy() : connections[connId].terminate();
+				}
+			}
+
+		} else {
+			resolve();
+		}
+	});
+};
+```
+
+### tcprelay-其他-prototype
+
+代码 113-148
+
+``` js
+
+TCPRelay.prototype.getStatus = function() {
+	return this.status;
+};
+
+TCPRelay.prototype.setServerName = function(serverName) {
+	this.serverName = serverName;
+	return this;
+};
+
+TCPRelay.prototype.getServerName = function() {
+	if (!this.serverName) {
+		this.serverName = this.isLocal ? 'local' : 'server';
+	}
+	return this.serverName;
+};
+
+TCPRelay.prototype.setLogLevel = function(logLevel) {
+	this.logLevel = logLevel;
+	return this;
+};
+
+TCPRelay.prototype.getLogLevel = function() {
+	return this.logLevel;
+};
+
+TCPRelay.prototype.setLogFile = function(logFile) {
+	if (logFile && !path.isAbsolute(logFile)) {
+		logFile = process.cwd() + '/' + logFile;
+	}
+	this.logFile = logFile;
+	return this;
+};
+
+TCPRelay.prototype.getLogFile = function() {
+	return this.logFile;
+};
+```
+
+
+---
 ## 其他
 
 - [ws-github source](https://github.com/websockets/ws)
