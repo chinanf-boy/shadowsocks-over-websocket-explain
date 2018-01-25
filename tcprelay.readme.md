@@ -135,6 +135,8 @@ function TCPRelay(config, isLocal) {
 }
 ```
 
+> [`config的覆盖例子`](#config-例子)
+
 我们先看 `local.js` 的使用
 
 ``` js
@@ -270,11 +272,11 @@ TCPRelay.prototype.initServer = function() {
 
 > 如果 allowHalfOpen 被设置为true, 那么当socket.end() 被显式调用时, 如果对边套接字发送了一个FIN包，服务只会返回一个FIN数据包， 这会持续到后来连接处在半闭状态 (不可读但是可写)。
 
-- server.maxConnections
+- `server.maxConnections`
 
 > 设置该属性使得当 server 连接数过多时拒绝连接。
 
-- server.on('connection'
+- `server.on('connection'`
 
 > 当一个新的connection建立的时候触发. 
 
@@ -282,7 +284,7 @@ TCPRelay.prototype.initServer = function() {
 
 > 本地-connection-建立-触发事件
 
-- server.listen(port, address)
+- `server.listen(port, address)`
 
 > 为 connections 启动一个 server 监听. 一个 net.Server 可以是一个 TCP 或者 一个 IPC server，这取决于它监听什么。
 
@@ -290,21 +292,36 @@ TCPRelay.prototype.initServer = function() {
 
 ## handleConnectionByLocal
 
+> [tcprelay-parseAddressHeader](#tcprelay-parseaddressheader)
+
+本地的服务端
+
+- 用`net.createServer`获取需要浏览的网页数据
+
+- 用`encryptor`加密
+
+- 用`new WebSocket`发送-服务器端-`ws`
+
 代码 316-444
 
 ``` js
 TCPRelay.prototype.handleConnectionByLocal = function(connection) {
+	// 注意-本地是监听-net.createServer
+
+	// 初始化 配置
 	var self = this;
 	var config = self.config;
 	var method = config.method;
 	var password = config.password;
 	var serverAddress = config.serverAddress;
 	var serverPort = config.serverPort;
-
 	var logger = self.logger;
 	var encryptor = new Encryptor(password, method);
 
+	// STAGE_INIT == 0
 	var stage = STAGE_INIT;
+	// globalConnectionId == 1
+	// MAX_CONNECTIONS == 50000
 	var connectionId = (globalConnectionId++) % MAX_CONNECTIONS;
 	var serverConnection, cmd, addressHeader;
 
@@ -312,13 +329,23 @@ TCPRelay.prototype.handleConnectionByLocal = function(connection) {
 	var dataCache = [];
 
 	logger.info(`[${connectionId}]: accept connection from client`);
+	// connections = {};
 	connections[connectionId] = connection;
 	connection.setKeepAlive(false);
 	connection.on('data', function(data) {
 		logger.debug(`[${connectionId}]: read data[length = ${data.length}] from client connection at stage[${STAGE[stage]}]`);
+	// 	const STAGE = {
+	// 	[-1]: 'STAGE_DESTROYED',
+	// 	0: 'STAGE_INIT',
+	// 	1: 'STAGE_ADDR',
+	// 	2: 'STAGE_UDP_ASSOC',
+	// 	3: 'STAGE_DNS',
+	// 	4: 'STAGE_CONNECTING',
+	// 	5: 'STAGE_STREAM'
+	// };
 		switch (stage) {
 
-			case STAGE_INIT:
+			case STAGE_INIT: // 初始化
 				if (data.length < 3 || data.readUInt8(0) != 5) {
 					stage = STAGE_DESTROYED;
 					return connection.end();
@@ -327,7 +354,7 @@ TCPRelay.prototype.handleConnectionByLocal = function(connection) {
 				stage = STAGE_ADDR;
 				break;
 
-			case STAGE_ADDR:
+			case STAGE_ADDR: // 获取地址
 				if (data.length < 10 || data.readUInt8(0) != 5) {
 					stage = STAGE_DESTROYED;
 					return connection.end();
@@ -389,7 +416,7 @@ TCPRelay.prototype.handleConnectionByLocal = function(connection) {
 				}
 				break;
 
-			case STAGE_CONNECTING:
+			case STAGE_CONNECTING: // 持续连接
 				dataCache.push(data);
 				break;
 
@@ -507,6 +534,14 @@ TCPRelay.prototype.initServer = function() {
 
 ## handleConnectionByServer
 
+> [tcprelay-parseAddressHeader](#tcprelay-parseaddressheader)
+
+服务器端
+
+- 用-`ws`-接收-本地-加密数据
+
+- 用`net.createConnection`-请求-本地-网址
+
 代码 205-313
 
 ``` js
@@ -531,6 +566,7 @@ TCPRelay.prototype.handleConnectionByServer = function(connection) {
 	logger.info(`[${connectionId}]: accept connection from local`);
 	connections[connectionId] = connection;
 	connection.on('message', function(data) {
+		// 接收-本地-加密数据
 		data = encryptor.decrypt(data);
 		logger.debug(`[${connectionId}]: read data[length = ${data.length}] from local connection at stage[${STAGE[stage]}]`);
 
@@ -551,6 +587,7 @@ TCPRelay.prototype.handleConnectionByServer = function(connection) {
 				stage = STAGE_CONNECTING;
 
 				targetConnection = net.createConnection({
+					// 站在-服务器-角度--连接-网址
 					port: addressHeader.dstPort,
 					host: addressHeader.dstAddr,
 					allowHalfOpen: true
@@ -650,6 +687,35 @@ TCPRelay.prototype.stop = function() {
 };
 ```
 
+### tcprelay-parseAddressHeader
+
+``` js
+function parseAddressHeader(data, offset) {
+	var addressType = data.readUInt8(offset);
+	var headerLen, dstAddr, dstPort, dstAddrLen;
+	//domain name
+	if (addressType == ADDRESS_TYPE_DOMAIN_NAME) {
+		dstAddrLen = data.readUInt8(offset + 1);
+		dstAddr = data.slice(offset + 2, offset + 2 + dstAddrLen).toString();
+		dstPort = data.readUInt16BE(offset + 2 + dstAddrLen);
+		headerLen = 4 + dstAddrLen;
+	}
+	//ipv4
+	else if (addressType == ADDRESS_TYPE_IPV4) {
+		dstAddr = data.slice(offset + 1, offset + 5).join('.').toString();
+		dstPort = data.readUInt16BE(offset + 5);
+		headerLen = 7;
+	} else {
+		return false;
+	}
+	return {
+		addressType: addressType,
+		headerLen: headerLen,
+		dstAddr: dstAddr,
+		dstPort: dstPort
+	};
+}
+```
 ### tcprelay-其他-prototype
 
 代码 113-148
@@ -701,3 +767,21 @@ TCPRelay.prototype.getLogFile = function() {
 - [ws-github source](https://github.com/websockets/ws)
 
 - [shadowsock-node-js-lib 库](https://github.com/shadowsocks/shadowsocks-nodejs/tree/master/lib/shadowsocks)
+
+### config-例子
+
+``` bash
+node tryconfig_default.js
+```
+
+- `tryconfig_default.js`
+
+``` js
+var defaultconfig = require('./config.json');
+var config = {serverPort: 1200}
+if (config) {
+    var Config = Object.assign(defaultconfig, config);
+}
+
+console.log(Config)
+```
