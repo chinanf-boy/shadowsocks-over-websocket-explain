@@ -1,0 +1,9 @@
+{
+  "scripts": {
+    "server": "node ws-try/server.js",
+    "local": "node ws-try/local.js"
+  },
+  "dependencies": {
+    "ws": "^4.0.0"
+  }
+}

@@ -212,6 +212,19 @@ TCPRelay.prototype.bootstrap = function() {
 
 ```
 
+---
+
+⏰为了更好了解-`ws` 的传输，可以运行 -ws-try- 例子
+
+`npm run server`
+
+在另一个终端上
+
+`npm run local`
+
+❤️
+---
+
 ### initServer-local
 
 代码 159-202
