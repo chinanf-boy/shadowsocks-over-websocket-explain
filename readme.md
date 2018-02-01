@@ -220,6 +220,6 @@ relay.bootstrap();
 
 ## 其他
 
-- [throng](https://github.com/hunterloftis/throng)
+- [throng 多进程开启](https://github.com/hunterloftis/throng)
 
-- [log4js](https://github.com/log4js-node/log4js-node)
+- [log4js 日志记录](https://github.com/log4js-node/log4js-node)
