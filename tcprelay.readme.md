@@ -214,6 +214,8 @@ TCPRelay.prototype.bootstrap = function() {
 
 ---
 
+### ws-try
+
 ⏰为了更好了解-`ws` 的传输，可以运行 -ws-try- 例子
 
 `npm run server`
@@ -222,7 +224,13 @@ TCPRelay.prototype.bootstrap = function() {
 
 `npm run local`
 
-❤️
+❤️[一些基础 ruanyifeng-WebSocket 教程](http://www.ruanyifeng.com/blog/2017/05/websocket.html)
+
+### net-createServer-try
+
+
+### net-createConnection-try
+
 ---
 
 ### initServer-local
@@ -279,7 +287,7 @@ TCPRelay.prototype.initServer = function() {
 
 - [net.createServer](http://nodejs.cn/api/net.html#net_net_createserver_options_connectionlistener)
 
-> 创建一个新的TCP或IPC服务。
+> [创建一个新的TCP或IPC服务。 >> 可以看看例子](#net-createserver-try)
 
 - `allowHalfOpen` <boolean> 表示是否允许一个半开的TCP连接。 
 
@@ -305,15 +313,15 @@ TCPRelay.prototype.initServer = function() {
 
 ## handleConnectionByLocal
 
-> [tcprelay-parseAddressHeader](#tcprelay-parseaddressheader)
+> [tcprelay-parseAddressHeader 解析-传输头数据->整理->规范数据](#tcprelay-parseaddressheader)
 
 本地的服务端
 
-- 用`net.createServer`获取需要浏览的网页数据
+- 用`net.createServer`获取需要浏览的网页数据 - [可以看看例子](#ws-try)
 
 - 用`encryptor`加密
 
-- 用`new WebSocket`发送-服务器端-`ws`
+- 用`new WebSocket`发送-服务器端-`ws` - [可以看看例子](#ws-try)
 
 代码 316-444
 
@@ -463,6 +471,8 @@ TCPRelay.prototype.handleConnectionByLocal = function(connection) {
 	});
 };
 ```
+
+
 ---
 
 ### initServer-server
@@ -533,7 +543,7 @@ TCPRelay.prototype.initServer = function() {
 
 - WebSocket.Server
 
-> ~~[服务器例子](./try-websocket-server.js)~~
+> ~~[服务器例子 >> 可以看看简单例子](#ws-try)~~
 
 - server.on('connection'
 
@@ -547,13 +557,13 @@ TCPRelay.prototype.initServer = function() {
 
 ## handleConnectionByServer
 
-> [tcprelay-parseAddressHeader](#tcprelay-parseaddressheader)
+> [tcprelay-parseAddressHeader 解析-传输头数据->整理->规范数据](#tcprelay-parseaddressheader)
 
 服务器端
 
-- 用-`ws`-接收-本地-加密数据
+- 用-`ws`-接收-本地-加密数据 - [可以看看ws-try例子](#ws-try)
 
-- 用`net.createConnection`-请求-本地-网址
+- 用`net.createConnection`-请求-本地-网址 - [可以看看net-例子](#net-createconnection-try)
 
 代码 205-313
 
@@ -701,6 +711,8 @@ TCPRelay.prototype.stop = function() {
 ```
 
 ### tcprelay-parseAddressHeader
+
+解析-传输头数据->整理->规范数据
 
 ``` js
 function parseAddressHeader(data, offset) {
